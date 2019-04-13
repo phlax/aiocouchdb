@@ -23,8 +23,14 @@ import aiocouchdb.client
 import aiocouchdb.errors
 from aiocouchdb.client import urljoin, extract_credentials
 
+import yarl
+
+from .base import AsyncMock
+
 
 TARGET = os.environ.get('AIOCOUCHDB_TARGET', 'mock')
+
+_URL = yarl.URL('http://bar.foo')
 
 
 def run_in_loop(f):
@@ -55,16 +61,14 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
     def setUp(self):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-
         wraps = None
         if self._test_target != 'mock':
-            wraps = self._request_tracer(aiocouchdb.client.request)
-        self._patch = mock.patch('aiocouchdb.client.request', wraps=wraps)
+            wraps = self._request_tracer(aiocouchdb.client.session.request)
+        self._patch = mock.patch('aiocouchdb.client.session.request', wraps=wraps)
         self.request = self._patch.start()
-
-        self._set_response(self.prepare_response())
+        response = self.prepare_response()
+        self._set_response(response)
         self._req_per_task = defaultdict(list)
-
         self.loop.run_until_complete(self.setup_env())
 
     def tearDown(self):
@@ -72,17 +76,15 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
         self._patch.stop()
         self.loop.close()
 
-    @asyncio.coroutine
-    def setup_env(self):
+    async def setup_env(self):
         sup = super()
         if hasattr(sup, 'setup_env'):
-            yield from sup.setup_env()
+            await sup.setup_env()
 
-    @asyncio.coroutine
-    def teardown_env(self):
+    async def teardown_env(self):
         sup = super()
         if hasattr(sup, 'teardown_env'):
-            yield from sup.teardown_env()
+            await sup.teardown_env()
 
     def future(self, obj):
         fut = asyncio.Future(loop=self.loop)
@@ -90,6 +92,7 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
         return fut
 
     def _request_tracer(self, f):
+
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             current_task = asyncio.Task.current_task(loop=self.loop)
@@ -116,8 +119,9 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
                     fut.set_result(b'')
                 return fut
             return side_effect
+
         headers = headers or {}
-        headers.setdefault('CONTENT-TYPE', 'application/json')
+        headers.setdefault('Content-Type', 'application/json')
         cookies = cookies or {}
 
         if isinstance(data, list):
@@ -126,20 +130,30 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
         else:
             chunks_queue = deque([data])
             lines_queue = deque(data.splitlines(keepends=True))
+        from aiocouchdb.client.response import Py__ClientResponse as ClientResponse
+        from aioclient.info import RequestInfo
+        resp = ClientResponse(
+            'get',
+            _URL,
+            request_info=RequestInfo(),
+            writer=None,
+            continue100=None,
+            timer=None,
+            traces=[],
+            loop=self.loop,
+            session=None)
 
-        resp = aiocouchdb.client.HttpResponse('', '')
-        resp._post_init(self.loop)
+        # resp._post_init(self.loop)
         resp.status = status
-        resp.headers = headers
+        resp._headers = headers
         resp.cookies = cookies
         resp.content = unittest.mock.Mock()
         resp.content._buffer = bytearray()
         resp.content.at_eof.return_value = False
         resp.content.read.side_effect = make_side_effect(chunks_queue)
         resp.content.readany.side_effect = make_side_effect(chunks_queue)
-        resp.content.readline.side_effect = make_side_effect(lines_queue)
-        resp.close = mock.Mock(side_effect=resp.close)
-
+        resp.content.readline = make_side_effect(lines_queue)
+        resp.close = mock.Mock()
         return resp
 
     @contextlib.contextmanager
@@ -149,12 +163,12 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
                  err=None,
                  headers=None,
                  status=200):
-        resp = self.prepare_response(cookies=cookies,
-                                     data=data,
-                                     err=err,
-                                     headers=headers,
-                                     status=status)
-
+        resp = self.prepare_response(
+            cookies=cookies,
+            data=data,
+            err=err,
+            headers=headers,
+            status=status)
         self._set_response(resp)
         yield resp
         resp.close()
@@ -172,15 +186,19 @@ class TestCase(unittest.TestCase, metaclass=MetaAioTestCase):
             call_args, call_kwargs = self._req_per_task[current_task][-1]
         else:
             call_args, call_kwargs = self.request.call_args
-        self.assertEqual((method, urljoin(self.url, *path)), call_args)
+        self.assertEqual((method, urljoin(self.url, list(path))), call_args)
 
         kwargs.setdefault('data', None)
         kwargs.setdefault('headers', {})
         kwargs.setdefault('params', {})
         for key, value in kwargs.items():
-            self.assertIn(key, call_kwargs)
-            if value is not Ellipsis:
-                self.assertEqual(value, call_kwargs[key])
+            try:
+                self.assertIn(key, call_kwargs)
+                if value is not Ellipsis:
+                    self.assertEqual(value, call_kwargs[key])
+            except:
+                print("Failed key: %s" % key)
+                raise
 
 
 class ServerTestCase(TestCase):
@@ -188,23 +206,21 @@ class ServerTestCase(TestCase):
     server_class = None
     url = os.environ.get('AIOCOUCHDB_URL', 'http://localhost:5984')
 
-    @asyncio.coroutine
-    def setup_env(self):
+    async def setup_env(self):
         self.url, creds = extract_credentials(self.url)
         self.server = self.server_class(self.url, loop=self.loop)
         if creds is not None:
-            self.cookie = yield from self.server.session.open(*creds)
+            self.cookie = await self.server.session.open(*creds)
         else:
             self.cookie = None
         sup = super()
         if hasattr(sup, 'setup_env'):
-            yield from sup.setup_env()
+            await sup.setup_env()
 
-    @asyncio.coroutine
-    def teardown_env(self):
+    async def teardown_env(self):
         sup = super()
         if hasattr(sup, 'teardown_env'):
-            yield from sup.teardown_env()
+            await sup.teardown_env()
 
 
 class DatabaseTestCase(ServerTestCase):
@@ -214,30 +230,26 @@ class DatabaseTestCase(ServerTestCase):
     def new_dbname(self):
         return dbname(self.id().split('.')[-1])
 
-    @asyncio.coroutine
-    def setup_env(self):
-        yield from super().setup_env()
+    async def setup_env(self):
+        await super().setup_env()
         dbname = self.new_dbname()
-        self.url_db = urljoin(self.url, dbname)
+        self.url_db = urljoin(self.url, [dbname])
         self.db = self.database_class(
             self.url_db, dbname=dbname, loop=self.loop)
-        yield from self.setup_database(self.db)
+        await self.setup_database(self.db)
 
-    @asyncio.coroutine
-    def setup_database(self, db):
+    async def setup_database(self, db):
         with self.response(data=b'{"ok": true}'):
-            yield from db.create()
+            await db.create()
 
-    @asyncio.coroutine
-    def teardown_env(self):
-        yield from self.teardown_database(self.db)
-        yield from super().teardown_env()
+    async def teardown_env(self):
+        await self.teardown_database(self.db)
+        await super().teardown_env()
 
-    @asyncio.coroutine
-    def teardown_database(self, db):
+    async def teardown_database(self, db):
         with self.response(data=b'{"ok": true}'):
             try:
-                yield from db.delete()
+                await db.delete()
             except aiocouchdb.errors.ResourceNotFound:
                 pass
 
@@ -246,19 +258,17 @@ class DocumentTestCase(DatabaseTestCase):
 
     document_class = None
 
-    @asyncio.coroutine
-    def setup_env(self):
-        yield from super().setup_env()
+    async def setup_env(self):
+        await super().setup_env()
         docid = uuid()
-        self.url_doc = urljoin(self.db.resource.url, docid)
+        self.url_doc = urljoin(self.db.resource.url, [docid])
         self.doc = self.document_class(
             self.url_doc, docid=docid, loop=self.loop)
-        yield from self.setup_document(self.doc)
+        await self.setup_document(self.doc)
 
-    @asyncio.coroutine
-    def setup_document(self, doc):
+    async def setup_document(self, doc):
         with self.response(data=b'{"rev": "1-ABC"}'):
-            resp = yield from doc.update({})
+            resp = await doc.update({})
         self.rev = resp['rev']
 
 
@@ -266,19 +276,17 @@ class DesignDocumentTestCase(DatabaseTestCase):
 
     designdoc_class = None
 
-    @asyncio.coroutine
-    def setup_env(self):
-        yield from super().setup_env()
+    async def setup_env(self):
+        await super().setup_env()
         docid = '_design/' + uuid()
-        self.url_ddoc = urljoin(self.db.resource.url, *docid.split('/'))
+        self.url_ddoc = urljoin(self.db.resource.url, docid.split('/'))
         self.ddoc = self.designdoc_class(
             self.url_ddoc, docid=docid, loop=self.loop)
-        yield from self.setup_document(self.ddoc)
+        await self.setup_document(self.ddoc)
 
-    @asyncio.coroutine
-    def setup_document(self, ddoc):
+    async def setup_document(self, ddoc):
         with self.response(data=b'{"rev": "1-ABC"}'):
-            resp = yield from ddoc.doc.update({
+            resp = await ddoc.doc.update({
                 'views': {
                     'viewname': {
                         'map': 'function(doc){ emit(doc._id, null) }'
@@ -292,21 +300,19 @@ class AttachmentTestCase(DocumentTestCase):
 
     attachment_class = None
 
-    @asyncio.coroutine
-    def setup_env(self):
-        yield from super().setup_env()
+    async def setup_env(self):
+        await super().setup_env()
         self.attbin = self.attachment_class(
-            urljoin(self.doc.resource.url, 'binary'),
+            urljoin(self.doc.resource.url, ['binary']),
             name='binary')
         self.atttxt = self.attachment_class(
-            urljoin(self.doc.resource.url, 'text'),
+            urljoin(self.doc.resource.url, ['text']),
             name='text')
         self.url_att = self.attbin.resource.url
 
-    @asyncio.coroutine
-    def setup_document(self, doc):
+    async def setup_document(self, doc):
         with self.response(data=b'{"rev": "1-ABC"}'):
-            resp = yield from doc.update({
+            resp = await doc.update({
                 '_attachments': {
                     'binary': {
                         'data': base64.b64encode(b'Time to relax!').decode(),
@@ -324,94 +330,93 @@ class AttachmentTestCase(DocumentTestCase):
 def modify_server(section, option, value):
     assert section != 'admins', 'use `with_fixed_admin_party` decorator'
 
-    @asyncio.coroutine
-    def apply_config_changes(server, cookie):
-        oldval = yield from server.config.update(section, option, value,
+    async def apply_config_changes(server, cookie):
+        oldval = await server.config.update(section, option, value,
                                                  auth=cookie)
         return oldval
 
-    @asyncio.coroutine
-    def revert_config_changes(server, cookie, oldval):
+    async def revert_config_changes(server, cookie, oldval):
         if not oldval:
             try:
-                yield from server.config.delete(section, option, auth=cookie)
+                await server.config.delete(section, option, auth=cookie)
             except aiocouchdb.errors.ResourceNotFound:
                 pass
         else:
-            if not (yield from server.config.exists(section, option)):
+            if not (await server.config.exists(section, option)):
                 return
-            oldval = yield from server.config.update(section, option, oldval,
+            oldval = await server.config.update(section, option, oldval,
                                                      auth=cookie)
             assert oldval == value, ('{} != {}'.format(oldval, value))
 
     def decorator(f):
+
         @functools.wraps(f)
-        def wrapper(testcase, **kwargs):
+        async def wrapper(testcase, **kwargs):
             server, cookie = testcase.server, testcase.cookie
-            oldval = yield from apply_config_changes(server, cookie)
+            oldval = await apply_config_changes(server, cookie)
             try:
-                yield from f(testcase, **kwargs)
+                await f(testcase, **kwargs)
             finally:
-                yield from revert_config_changes(server, cookie, oldval)
+                await revert_config_changes(server, cookie, oldval)
         return wrapper
     return decorator
 
 
 def with_fixed_admin_party(username, password):
-    @asyncio.coroutine
-    def apply_config_changes(server, cookie):
-        oldval = yield from server.config.update('admins', username, password,
+
+    async def apply_config_changes(server, cookie):
+        oldval = await server.config.update('admins', username, password,
                                                  auth=cookie)
-        cookie = yield from server.session.open(username, password)
+        cookie = await server.session.open(username, password)
         return oldval, cookie
 
-    @asyncio.coroutine
-    def revert_config_changes(server, cookie, oldval):
+    async def revert_config_changes(server, cookie, oldval):
         if not oldval:
             try:
-                yield from server.config.delete('admins', username, auth=cookie)
+                await server.config.delete('admins', username, auth=cookie)
             except aiocouchdb.errors.ResourceNotFound:
                 pass
         else:
-            yield from server.config.update('admins', username, oldval,
+            await server.config.update('admins', username, oldval,
                                             auth=cookie)
 
     def decorator(f):
+
         @functools.wraps(f)
-        def wrapper(testcase, **kwargs):
+        async def wrapper(testcase, **kwargs):
             server, cookie = testcase.server, testcase.cookie
-            oldval, cookie = yield from apply_config_changes(server, cookie)
+            oldval, cookie = await apply_config_changes(server, cookie)
             if cookie is not None:
                 kwargs[username] = cookie
             try:
-                yield from f(testcase, **kwargs)
+                await f(testcase, **kwargs)
             finally:
-                yield from revert_config_changes(server, cookie, oldval)
+                await revert_config_changes(server, cookie, oldval)
         return wrapper
     return decorator
 
 
 def using_database(dbarg='db'):
-    @asyncio.coroutine
-    def create_database(server, cookie):
+
+    async def create_database(server, cookie):
         db = server[dbname()]
-        yield from db.create(auth=cookie)
+        await db.create(auth=cookie)
         return db
 
-    @asyncio.coroutine
-    def drop_database(db, cookie):
+    async def drop_database(db, cookie):
         try:
-            yield from db.delete(auth=cookie)
+            await db.delete(auth=cookie)
         except aiocouchdb.errors.ResourceNotFound:
             pass
 
     def decorator(f):
+
         @functools.wraps(f)
-        def wrapper(testcase, **kwargs):
+        async def wrapper(testcase, **kwargs):
             server, cookie = testcase.server, testcase.cookie
 
             with testcase.response(data=b'{"ok": true}'):
-                db = yield from create_database(server, cookie)
+                db = await create_database(server, cookie)
 
             assert dbarg not in kwargs, \
                 'conflict: both {} and {} are referenced as {}'.format(
@@ -421,16 +426,16 @@ def using_database(dbarg='db'):
             kwargs[dbarg] = db
 
             try:
-                yield from f(testcase, **kwargs)
+                await f(testcase, **kwargs)
             finally:
                 with testcase.response(data=b'{"ok": true}'):
-                    yield from drop_database(db, cookie)
+                    await drop_database(db, cookie)
         return wrapper
     return decorator
 
 
-@asyncio.coroutine
-def populate_database(db, docs_count):
+async def populate_database(db, docs_count):
+
     def generate_docs(count):
         for _ in range(count):
             dt = datetime.datetime.fromtimestamp(
@@ -445,11 +450,11 @@ def populate_database(db, docs_count):
             }
             yield doc
 
-    if not (yield from db.exists()):
-        yield from db.create()
+    if not (await db.exists()):
+        await db.create()
 
     docs = list(generate_docs(docs_count))
-    updates = yield from db.bulk_docs(docs)
+    updates = await db.bulk_docs(docs)
     mapping = {doc['_id']: doc for doc in docs}
     if not updates:
         return {}

@@ -13,7 +13,7 @@ from . import utils
 
 class DatabaseSecurityTestCase(utils.DatabaseTestCase):
 
-    def test_security_get(self):
+    async def test_security_get(self):
         data = {
             'admins': {
                 'names': [],
@@ -25,11 +25,11 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
             }
         }
 
-        result = yield from self.db.security.get()
+        result = await self.db.security.get()
         self.assert_request_called_with('GET', self.db.name, '_security')
         self.assertEqual(data, result)
 
-    def test_security_update(self):
+    async def test_security_update(self):
         data = {
             'admins': {
                 'names': ['foo'],
@@ -41,13 +41,13 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
             }
         }
 
-        yield from self.db.security.update(admins={'names': ['foo']},
+        await self.db.security.update(admins={'names': ['foo']},
                                            members={'roles': ['bar', 'baz']})
         self.assert_request_called_with('PUT', self.db.name, '_security',
                                         data=data)
 
-    def test_security_update_merge(self):
-        yield from self.db.security.update(
+    async def test_security_update_merge(self):
+        await self.db.security.update(
             admins={"names": ["foo"], "roles": []},
             members={"names": [], "roles": ["bar", "baz"]})
 
@@ -61,7 +61,7 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
                 "roles": ["bar", "baz"]
             }
         }'''):
-            yield from self.db.security.update(admins={'roles': ['zoo']},
+            await self.db.security.update(admins={'roles': ['zoo']},
                                                members={'names': ['boo']},
                                                merge=True)
             data = {
@@ -77,8 +77,8 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
             self.assert_request_called_with('PUT', self.db.name, '_security',
                                             data=data)
 
-    def test_security_update_merge_duplicate(self):
-        yield from self.db.security.update(
+    async def test_security_update_merge_duplicate(self):
+        await self.db.security.update(
             admins={"names": ["foo"], "roles": []},
             members={"names": [], "roles": ["bar", "baz"]})
 
@@ -92,7 +92,7 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
                 "roles": ["bar", "baz"]
             }
         }'''):
-            yield from self.db.security.update(admins={'names': ['foo', 'bar']},
+            await self.db.security.update(admins={'names': ['foo', 'bar']},
                                                merge=True)
             data = {
                 'admins': {
@@ -107,9 +107,9 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
             self.assert_request_called_with('PUT', self.db.name, '_security',
                                             data=data)
 
-    def test_security_update_empty_admins(self):
+    async def test_security_update_empty_admins(self):
         with self.response(data=b'{}'):
-            yield from self.db.security.update_admins()
+            await self.db.security.update_admins()
             data = {
                 'admins': {
                     'names': [],
@@ -123,9 +123,9 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
             self.assert_request_called_with('PUT', self.db.name, '_security',
                                             data=data)
 
-    def test_security_update_some_admins(self):
+    async def test_security_update_some_admins(self):
         with self.response(data=b'{}'):
-            yield from self.db.security.update_admins(names=['foo'],
+            await self.db.security.update_admins(names=['foo'],
                                                       roles=['bar', 'baz'])
             data = {
                 'admins': {
@@ -140,9 +140,9 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
             self.assert_request_called_with('PUT', self.db.name, '_security',
                                             data=data)
 
-    def test_security_update_empty_members(self):
+    async def test_security_update_empty_members(self):
         with self.response(data=b'{}'):
-            yield from self.db.security.update_members()
+            await self.db.security.update_members()
             data = {
                 'admins': {
                     'names': [],
@@ -156,9 +156,9 @@ class DatabaseSecurityTestCase(utils.DatabaseTestCase):
             self.assert_request_called_with('PUT', self.db.name, '_security',
                                             data=data)
 
-    def test_security_update_some_members(self):
+    async def test_security_update_some_members(self):
         with self.response(data=b'{}'):
-            yield from self.db.security.update_members(names=['foo'],
+            await self.db.security.update_members(names=['foo'],
                                                        roles=['bar', 'baz'])
             data = {
                 'admins': {

@@ -13,6 +13,9 @@ import sys
 from os.path import join
 from setuptools import setup, find_packages
 
+from Cython.Build import cythonize
+
+
 setup_dir = os.path.dirname(__file__)
 mod = imp.load_module(
     'version', *imp.find_module('version', [join(setup_dir, 'aiocouchdb')]))
@@ -75,5 +78,10 @@ setup(
     tests_require=[
         'flake8==2.4.1',
         'nose==1.3.7'
-    ]
+    ],
+    ext_modules=(
+        cythonize("aiocouchdb/*.pyx", annotate=True)
+        + cythonize("aiocouchdb/authn/*.pyx", annotate=True)
+        + cythonize("aiocouchdb/client/*.pyx", annotate=True)
+        + cythonize("aiocouchdb/v1/*.pyx", annotate=True))
 )

@@ -77,7 +77,7 @@ class CookieAuthProviderTestCase(unittest.TestCase):
 
     def setUp(self):
         self.auth = aiocouchdb.authn.CookieAuthProvider()
-        self.resp = mock.Mock(spec=aiocouchdb.client.HttpResponse)
+        self.resp = mock.Mock(spec=aiocouchdb.client.ClientResponse)
         self.resp.cookies = http.cookies.SimpleCookie({'AuthSession': 'secret'})
 
     def test_update_cookies_from_response(self):
@@ -91,7 +91,7 @@ class CookieAuthProviderTestCase(unittest.TestCase):
         self.assertIs(self.auth._cookies, self.resp.cookies)
 
         # another response
-        resp = mock.Mock(spec=aiocouchdb.client.HttpResponse)
+        resp = mock.Mock(spec=aiocouchdb.client.ClientResponse)
         resp.cookies = http.cookies.SimpleCookie()
         self.auth.update(resp)
         self.assertIs(self.auth._cookies, self.resp.cookies)

@@ -23,35 +23,35 @@ class HttpErrorsTestCase(utils.TestCase):
             status=500,
             data=b'{"error": "test", "reason": "passed"}')
 
-    def test_should_not_raise_error_on_success_response(self):
+    async def test_should_not_raise_error_on_success_response(self):
         self.resp.status = 200
-        yield from aiocouchdb.errors.maybe_raise_error(self.resp)
+        await aiocouchdb.errors.maybe_raise_error(self.resp)
 
-    def test_raise_aiohttp_exception(self):
-        with self.assertRaises(aiohttp.errors.HttpProcessingError):
-            yield from aiocouchdb.errors.maybe_raise_error(self.resp)
+    async def test_raise_aiohttp_exception(self):
+        with self.assertRaises(aiohttp.http_exceptions.HttpProcessingError):
+            await aiocouchdb.errors.maybe_raise_error(self.resp)
 
-    def test_decode_common_error_response(self):
+    async def test_decode_common_error_response(self):
         try:
-            yield from aiocouchdb.errors.maybe_raise_error(self.resp)
+            await aiocouchdb.errors.maybe_raise_error(self.resp)
         except aiocouchdb.errors.HttpErrorException as exc:
             self.assertEqual('test', exc.error)
             self.assertEqual('passed', exc.reason)
         else:
             assert False, 'exception expected'
 
-    def test_exception_holds_response_headers(self):
+    async def test_exception_holds_response_headers(self):
         self.resp.headers['X-Foo'] = 'bar'
         try:
-            yield from aiocouchdb.errors.maybe_raise_error(self.resp)
+            await aiocouchdb.errors.maybe_raise_error(self.resp)
         except aiocouchdb.errors.HttpErrorException as exc:
             self.assertEqual('bar', exc.headers.get('X-Foo'))
         else:
             assert False, 'exception expected'
 
-    def test_exc_to_str(self):
+    async def test_exc_to_str(self):
         try:
-            yield from aiocouchdb.errors.maybe_raise_error(self.resp)
+            await aiocouchdb.errors.maybe_raise_error(self.resp)
         except aiocouchdb.errors.HttpErrorException as exc:
             self.assertEqual('[test] passed', str(exc))
         else:

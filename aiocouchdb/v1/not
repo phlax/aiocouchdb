@@ -1,0 +1,11 @@
+    #: Default :class:`~aiocouchdb.v1.document.Document` instance class
+    document_class = Document
+
+    #: Default :class:`~aiocouchdb.v1.designdoc.DesignDocument` instance class
+    design_document_class = DesignDocument
+
+    #: Default :class:`~aiocouchdb.v1.security.DatabaseSecurity` instance class
+    security_class = DatabaseSecurity
+
+    #: :class:`Views requesting  helper<aiocouchdb.views.Views>`
+    view_class = View

@@ -20,7 +20,7 @@ class AuthDatabaseTestCase(utils.ServerTestCase):
 
     def setUp(self):
         super().setUp()
-        self.url_db = urljoin(self.url, '_users')
+        self.url_db = urljoin(self.url, ['_users'])
         self.db = aiocouchdb.v1.authdb.AuthDatabase(self.url_db)
 
     def test_get_doc_with_prefix(self):
@@ -37,15 +37,14 @@ class UserDocumentTestCase(utils.ServerTestCase):
         super().setUp()
         self.username = utils.uuid()
         docid = aiocouchdb.v1.authdb.UserDocument.doc_prefix + self.username
-        self.url_doc = urljoin(self.url, '_users', docid)
+        self.url_doc = urljoin(self.url, ['_users', docid])
         self.doc = aiocouchdb.v1.authdb.UserDocument(self.url_doc, docid=docid)
 
     def tearDown(self):
         self.loop.run_until_complete(self.teardown_document())
         super().tearDown()
 
-    @asyncio.coroutine
-    def setup_document(self, password, **kwargs):
+    async def setup_document(self, password, **kwargs):
         data = {
             '_id': self.doc.id,
             'name': self.doc.name,
@@ -55,18 +54,17 @@ class UserDocumentTestCase(utils.ServerTestCase):
         }
         data.update(kwargs)
         with self.response(data=b'{}'):
-            resp = yield from self.doc.register(password, **kwargs)
+            resp = await self.doc.register(password, **kwargs)
         self.assert_request_called_with('PUT', '_users', self.doc.id, data=data)
         self.assertIsInstance(resp, dict)
         return resp
 
-    @asyncio.coroutine
-    def teardown_document(self):
-        if not (yield from self.doc.exists()):
+    async def teardown_document(self):
+        if not (await self.doc.exists()):
             return
-        with self.response(headers={'ETAG': '"1-ABC"'}):
-            rev = yield from self.doc.rev()
-        yield from self.doc.delete(rev)
+        with self.response(headers={'Etag': '"1-ABC"'}):
+            rev = await self.doc.rev()
+        await self.doc.delete(rev)
 
     def test_require_docid(self):
         with self.assertRaises(ValueError):
@@ -75,20 +73,20 @@ class UserDocumentTestCase(utils.ServerTestCase):
     def test_username(self):
         self.assertEqual(self.doc.name, self.username)
 
-    def test_register(self):
-        yield from self.setup_document('s3cr1t')
+    async def test_register(self):
+        await self.setup_document('s3cr1t')
 
-    def test_register_with_additional_data(self):
-        yield from self.setup_document('s3cr1t', email='user@example.com')
+    async def test_register_with_additional_data(self):
+        await self.setup_document('s3cr1t', email='user@example.com')
 
-    def test_change_password(self):
-        yield from self.setup_document('s3cr1t')
+    async def test_change_password(self):
+        await self.setup_document('s3cr1t')
         with self.response(data=b'{}'):
-            doc = yield from self.doc.get()
+            doc = await self.doc.get()
         data = json.dumps(doc).encode()
 
         with self.response(data=data):
-            yield from self.doc.update_password('n3ws3cr1t')
+            await self.doc.update_password('n3ws3cr1t')
             doc['password'] = 'n3ws3cr1t'
             self.assert_request_called_with(
                 'PUT', '_users', self.doc.id,

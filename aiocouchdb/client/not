@@ -1,0 +1,10 @@
+
+    cpdef update_path(self, params):
+        if isinstance(params, dict):
+            params = params.copy()
+            for key, value in params.items():
+                if value is True:
+                    params[key] = 'true'
+                elif value is False:
+                    params[key] = 'false'
+        return super().update_path(params)

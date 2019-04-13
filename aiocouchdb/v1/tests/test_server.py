@@ -9,6 +9,9 @@
 
 import asyncio
 
+from aiocouchdb.v1.authdb import AuthDatabase
+from aiocouchdb.v1.config import ServerConfig
+from aiocouchdb.v1.session import Session
 import aiocouchdb.client
 import aiocouchdb.feeds
 import aiocouchdb.v1.config
@@ -29,21 +32,21 @@ class ServerTestCase(utils.ServerTestCase):
         self.assertIsInstance(server.resource, aiocouchdb.client.Resource)
         self.assertEqual(self.url, self.server.resource.url)
 
-    def test_info(self):
+    async def test_info(self):
         with self.response(data=b'{}'):
-            result = yield from self.server.info()
+            result = await self.server.info()
             self.assert_request_called_with('GET')
         self.assertIsInstance(result, dict)
 
-    def test_active_tasks(self):
+    async def test_active_tasks(self):
         with self.response(data=b'[]'):
-            result = yield from self.server.active_tasks()
+            result = await self.server.active_tasks()
             self.assert_request_called_with('GET', '_active_tasks')
         self.assertIsInstance(result, list)
 
-    def test_all_dbs(self):
+    async def test_all_dbs(self):
         with self.response(data=b'[]'):
-            result = yield from self.server.all_dbs()
+            result = await self.server.all_dbs()
             self.assert_request_called_with('GET', '_all_dbs')
         self.assertIsInstance(result, list)
 
@@ -53,7 +56,7 @@ class ServerTestCase(utils.ServerTestCase):
         self.assertIsInstance(db, self.server.authdb_class)
 
     def test_authdb_custom_class(self):
-        class CustomDatabase(object):
+        class CustomDatabase(AuthDatabase):
             def __init__(self, thing, **kwargs):
                 self.resource = thing
 
@@ -73,18 +76,18 @@ class ServerTestCase(utils.ServerTestCase):
                               aiocouchdb.v1.config.ServerConfig)
 
     def test_custom_config(self):
-        class CustomConfig(object):
+        class CustomConfig(ServerConfig):
             def __init__(self, thing):
                 self.resource = thing
         server = aiocouchdb.v1.server.Server(config_class=CustomConfig)
         self.assertIsInstance(server.config, CustomConfig)
 
-    def test_database(self):
-        result = yield from self.server.db('db')
+    async def test_database(self):
+        result = await self.server.db('db')
         self.assert_request_called_with('HEAD', 'db')
         self.assertIsInstance(result, self.server.database_class)
 
-    def test_database_custom_class(self):
+    async def test_database_custom_class(self):
         class CustomDatabase(object):
             def __init__(self, thing, **kwargs):
                 self.resource = thing
@@ -92,7 +95,7 @@ class ServerTestCase(utils.ServerTestCase):
         server = aiocouchdb.v1.server.Server(self.url,
                                              database_class=CustomDatabase)
 
-        result = yield from server.db('db')
+        result = await server.db('db')
         self.assert_request_called_with('HEAD', 'db')
         self.assertIsInstance(result, CustomDatabase)
         self.assertIsInstance(result.resource, aiocouchdb.client.Resource)
@@ -104,28 +107,28 @@ class ServerTestCase(utils.ServerTestCase):
         self.assertIsInstance(db, self.server.database_class)
 
     def trigger_db_update(self, db):
-        @asyncio.coroutine
-        def task():
-            yield from asyncio.sleep(0.1)
-            yield from db[utils.uuid()].update({})
+
+        async def task():
+            await asyncio.sleep(0.1)
+            await db[utils.uuid()].update({})
         asyncio.Task(task())
 
     @utils.using_database()
-    def test_db_updates(self, db):
+    async def test_db_updates(self, db):
         self.trigger_db_update(db)
 
         with self.response(data=('{"db_name": "%s"}' % db.name).encode()):
-            event = yield from self.server.db_updates()
+            event = await self.server.db_updates()
             self.assert_request_called_with('GET', '_db_updates')
         self.assertIsInstance(event, dict)
         self.assertEqual(event['db_name'], db.name, event)
 
     @utils.using_database()
-    def test_db_updates_feed_continuous(self, db):
+    async def test_db_updates_feed_continuous(self, db):
         self.trigger_db_update(db)
 
         with self.response(data=('{"db_name": "%s"}' % db.name).encode()):
-            feed = yield from self.server.db_updates(feed='continuous',
+            feed = await self.server.db_updates(feed='continuous',
                                                      timeout=1000,
                                                      heartbeat=False)
             self.assert_request_called_with('GET', '_db_updates',
@@ -135,17 +138,17 @@ class ServerTestCase(utils.ServerTestCase):
 
         self.assertIsInstance(feed, aiocouchdb.feeds.JsonFeed)
         while True:
-            event = yield from feed.next()
+            event = await feed.next()
             if event is None:
                 break
             self.assertEqual(event['db_name'], db.name, event)
 
     @utils.using_database()
-    def test_db_updates_feed_eventsource(self, db):
+    async def test_db_updates_feed_eventsource(self, db):
         self.trigger_db_update(db)
 
         with self.response(data=('data: {"db_name": "%s"}' % db.name).encode()):
-            feed = yield from self.server.db_updates(feed='eventsource',
+            feed = await self.server.db_updates(feed='eventsource',
                                                      timeout=1000,
                                                      heartbeat=False)
             self.assert_request_called_with('GET', '_db_updates',
@@ -155,31 +158,31 @@ class ServerTestCase(utils.ServerTestCase):
 
         self.assertIsInstance(feed, aiocouchdb.feeds.EventSourceFeed)
         while True:
-            event = yield from feed.next()
+            event = await feed.next()
             if event is None:
                 break
             self.assertEqual(event['data']['db_name'], db.name, event)
 
-    def test_log(self):
-        result = yield from self.server.log()
+    async def test_log(self):
+        result = await self.server.log()
         self.assert_request_called_with('GET', '_log')
         self.assertIsInstance(result, str)
 
     @utils.using_database('source')
     @utils.using_database('target')
-    def test_replicate(self, source, target):
+    async def test_replicate(self, source, target):
         with self.response(data=b'[]'):
-            yield from utils.populate_database(source, 10)
+            await utils.populate_database(source, 10)
 
         with self.response(data=b'{"history": [{"docs_written": 10}]}'):
-            info = yield from self.server.replicate(source.name, target.name)
+            info = await self.server.replicate(source.name, target.name)
             self.assert_request_called_with(
                 'POST', '_replicate', data={'source': source.name,
                                             'target': target.name})
         self.assertEqual(info['history'][0]['docs_written'], 10)
 
     @utils.run_for('mock')
-    def test_replicate_kwargs(self):
+    async def test_replicate_kwargs(self):
         all_kwargs = {
             'cancel': True,
             'continuous': True,
@@ -200,14 +203,15 @@ class ServerTestCase(utils.ServerTestCase):
         }
 
         for key, value in all_kwargs.items():
-            yield from self.server.replicate('source', 'target',
-                                             **{key: value})
+            await self.server.replicate(
+                'source', 'target',
+                **{key: value})
             data = {'source': 'source', 'target': 'target', key: value}
             self.assert_request_called_with('POST', '_replicate', data=data)
 
     @utils.run_for('mock')
-    def test_restart(self):
-        yield from self.server.restart()
+    async def test_restart(self):
+        await self.server.restart()
         self.assert_request_called_with('POST', '_restart')
 
     def test_session(self):
@@ -215,43 +219,45 @@ class ServerTestCase(utils.ServerTestCase):
                               aiocouchdb.v1.session.Session)
 
     def test_custom_session(self):
-        class CustomSession(object):
+
+        class CustomSession(Session):
             def __init__(self, thing):
                 self.resource = thing
         server = aiocouchdb.v1.server.Server(session_class=CustomSession)
         self.assertIsInstance(server.session, CustomSession)
 
-    def test_stats(self):
-        yield from self.server.stats()
+    async def test_stats(self):
+        await self.server.stats()
         self.assert_request_called_with('GET', '_stats')
 
-    def test_stats_flush(self):
-        yield from self.server.stats(flush=True)
+    async def test_stats_flush(self):
+        await self.server.stats(flush=True)
         self.assert_request_called_with('GET', '_stats', params={'flush': True})
 
-    def test_stats_range(self):
-        yield from self.server.stats(range=60)
+    async def test_stats_range(self):
+        await self.server.stats(range=60)
         self.assert_request_called_with('GET', '_stats', params={'range': 60})
 
-    def test_stats_single_metric(self):
-        yield from self.server.stats('httpd/requests')
+    async def test_stats_single_metric(self):
+        await self.server.stats('httpd/requests')
         self.assert_request_called_with('GET', '_stats', 'httpd', 'requests')
 
-    def test_stats_invalid_metric(self):
+    async def test_stats_invalid_metric(self):
         with self.assertRaises(ValueError):
-            yield from self.server.stats('httpd')
+            await self.server.stats('httpd')
 
-    def test_uuids(self):
+    async def test_uuids(self):
         with self.response(data=b'{"uuids": ["..."]}'):
-            result = yield from self.server.uuids()
+            result = await self.server.uuids()
             self.assert_request_called_with('GET', '_uuids')
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 1)
 
-    def test_uuids_count(self):
+    async def test_uuids_count(self):
         with self.response(data=b'{"uuids": ["...", "..."]}'):
-            result = yield from self.server.uuids(count=2)
-            self.assert_request_called_with('GET', '_uuids',
-                                            params={'count': 2})
+            result = await self.server.uuids(count=2)
+            self.assert_request_called_with(
+                'GET', '_uuids',
+                params={'count': 2})
         self.assertIsInstance(result, list)
         self.assertEqual(len(result), 2)
